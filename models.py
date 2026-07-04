@@ -116,6 +116,7 @@ class SyncResult:
     updated: int = 0
     unchanged: int = 0
     failed: int = 0
+    cleaned: int = 0
     errors: list = field(default_factory=list)
 
     @property
@@ -130,6 +131,8 @@ class SyncResult:
             parts.append(f"🔄 {self.updated} updated")
         if self.unchanged:
             parts.append(f"⏭️  {self.unchanged} unchanged")
+        if self.cleaned:
+            parts.append(f"🗑️  {self.cleaned} cleaned")
         if self.failed:
             parts.append(f"❌ {self.failed} failed")
         return " | ".join(parts) if parts else "No items processed"

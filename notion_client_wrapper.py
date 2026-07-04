@@ -328,6 +328,45 @@ class NotionClientWrapper:
             return rich_text[0].get("plain_text", "")
         return None
 
+    def cleanup_orphans(self, active_keys: set[str]) -> int:
+        """
+        Delete pages from Notion whose sync keys are no longer active
+        (e.g., items from old courses).
+        """
+        removed = 0
+        has_more = True
+        start_cursor = None
+
+        while has_more:
+            body = {"page_size": 100}
+            if start_cursor:
+                body["start_cursor"] = start_cursor
+
+            resp = self._http.post(
+                f"/v1/databases/{self.database_id}/query",
+                json=body,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+
+            for page in result.get("results", []):
+                sync_key = self._extract_sync_key(page)
+                if sync_key and sync_key not in active_keys:
+                    page_id = page["id"]
+                    self.client.pages.update(
+                        page_id=page_id,
+                        archived=True,
+                    )
+                    removed += 1
+                    logger.info("🗑️  Archived orphan: %s", sync_key)
+
+            has_more = result.get("has_more", False)
+            start_cursor = result.get("next_cursor")
+
+        if removed:
+            logger.info("Cleaned up %d orphan pages", removed)
+        return removed
+
     # ─────────────────────────────────────────────
     # Testing
     # ─────────────────────────────────────────────

@@ -264,6 +264,12 @@ def sync_to_notion(
             result.failed += 1
             result.errors.append(f"{activity.title}: {e}")
 
+    # Clean up orphaned entries (from old courses)
+    active_keys = {a.unique_key for a in activities}
+    cleaned = notion.cleanup_orphans(active_keys)
+    if cleaned:
+        result.cleaned = cleaned
+
     return result
 
 
