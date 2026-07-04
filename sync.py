@@ -64,14 +64,19 @@ def setup_logging(verbose: bool = False):
 
 
 def load_config() -> dict:
-    """Load configuration from config.env file."""
-    if not CONFIG_FILE.exists():
-        print(f"{Fore.RED}❌ Config file not found: {CONFIG_FILE}{Style.RESET_ALL}")
-        print(f"   Copy config.env.example to config.env and fill in your credentials.")
-        print(f"   {Fore.CYAN}cp config.env.example config.env{Style.RESET_ALL}")
-        sys.exit(1)
-
-    load_dotenv(CONFIG_FILE)
+    """Load configuration from config.env file or environment variables."""
+    # Check if env vars are already set (GitHub Actions, etc.)
+    if os.getenv("MOODLE_USERNAME") and os.getenv("MOODLE_PASSWORD"):
+        logger = logging.getLogger(__name__)
+        logger.info("Using environment variables for configuration")
+    else:
+        # Fall back to config.env file
+        if not CONFIG_FILE.exists():
+            print(f"{Fore.RED}❌ Config file not found: {CONFIG_FILE}{Style.RESET_ALL}")
+            print(f"   Copy config.env.example to config.env and fill in your credentials.")
+            print(f"   {Fore.CYAN}cp config.env.example config.env{Style.RESET_ALL}")
+            sys.exit(1)
+        load_dotenv(CONFIG_FILE)
 
     required = ["MOODLE_USERNAME", "MOODLE_PASSWORD", "NOTION_TOKEN", "NOTION_DATABASE_ID"]
     config = {}

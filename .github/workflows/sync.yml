@@ -1,0 +1,35 @@
+name: Daily UoPeople Sync
+
+on:
+  schedule:
+    # Runs at 1:00 AM UTC = 7:00 AM Asia/Dhaka (UTC+6)
+    - cron: "0 1 * * *"
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        run: python sync.py
+        env:
+          MOODLE_USERNAME: ${{ secrets.MOODLE_USERNAME }}
+          MOODLE_PASSWORD: ${{ secrets.MOODLE_PASSWORD }}
+          LEARN_URL: ${{ secrets.LEARN_URL }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          TIMEZONE: ${{ secrets.TIMEZONE }}
+          URGENT_HOURS: ${{ secrets.URGENT_HOURS }}
+          SOON_HOURS: ${{ secrets.SOON_HOURS }}
