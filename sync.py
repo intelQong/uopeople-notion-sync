@@ -124,10 +124,17 @@ def print_activity_table(activities: list[MoodleActivity], config: dict):
         print(f"  {Fore.YELLOW}No activities found.{Style.RESET_ALL}")
         return
 
+    now = datetime.now()
+    overdue = [a for a in activities if a.due_date and a.due_date < now]
+    upcoming = [a for a in activities if not a.due_date or a.due_date >= now]
+    overdue.sort(key=lambda a: a.due_date, reverse=True)    # most recent overdue first
+    upcoming.sort(key=lambda a: a.due_date or datetime.max)  # soonest first
+    sorted_acts = overdue + upcoming
+
     print(f"\n  {'#':<4} {'Type':<12} {'Course':<30} {'Title':<35} {'Due Date':<20}")
     print(f"  {'─'*4} {'─'*12} {'─'*30} {'─'*35} {'─'*20}")
 
-    for i, act in enumerate(activities, 1):
+    for i, act in enumerate(sorted_acts, 1):
         priority = act.calculate_priority(config["URGENT_HOURS"], config["SOON_HOURS"])
 
         # Color based on priority
