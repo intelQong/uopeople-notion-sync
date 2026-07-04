@@ -9,10 +9,13 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from notion_client import Client as NotionClient
 from notion_client.errors import APIResponseError
 
 from models import ActivityType, MoodleActivity, Priority, SyncStatus
+
+_NOTION_VERSION = "2022-06-28"
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +57,15 @@ class NotionClientWrapper:
         self.client = NotionClient(auth=token)
         self.database_id = database_id
         self._existing_entries: dict[str, str] = {}  # unique_key -> page_id
+        self._title_prop: str = "Name"  # Default, overridden in validate_database
+        self._http = httpx.Client(
+            base_url="https://api.notion.com",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Notion-Version": _NOTION_VERSION,
+                "Content-Type": "application/json",
+            },
+        )
 
     # ─────────────────────────────────────────────
     # Database Setup & Validation
@@ -79,6 +91,12 @@ class NotionClientWrapper:
             logger.info("✅ Connected to Notion database: '%s'", title)
             logger.info("   Properties: %s", ", ".join(properties))
 
+            # Detect the title property name
+            for prop_name, prop_def in db.get("properties", {}).items():
+                if prop_def.get("type") == "title":
+                    self._title_prop = prop_name
+                    break
+
             return {
                 "success": True,
                 "title": title,
@@ -102,7 +120,6 @@ class NotionClientWrapper:
         Creates missing properties if needed.
         """
         required_props = {
-            "Task": "title",
             "Course": "select",
             "Type": "select",
             "Due Date": "date",
@@ -122,10 +139,7 @@ class NotionClientWrapper:
             for prop_name, prop_type in required_props.items():
                 if prop_name not in existing_props:
                     logger.info("Adding missing property: %s (%s)", prop_name, prop_type)
-                    if prop_type == "title":
-                        # Title property already exists as the first column
-                        continue
-                    elif prop_type == "select":
+                    if prop_type == "select":
                         updates[prop_name] = {"select": {"options": []}}
                     elif prop_type == "date":
                         updates[prop_name] = {"date": {}}
@@ -137,9 +151,9 @@ class NotionClientWrapper:
                         updates[prop_name] = {"rich_text": {}}
 
             if updates:
-                self.client.databases.update(
-                    database_id=self.database_id,
-                    properties=updates,
+                self._http.patch(
+                    f"/v1/databases/{self.database_id}",
+                    json={"properties": updates},
                 )
                 logger.info("✅ Updated database schema with %d new properties", len(updates))
             else:
@@ -163,14 +177,18 @@ class NotionClientWrapper:
         start_cursor = None
 
         while has_more:
-            query_params = {
-                "database_id": self.database_id,
+            body = {
                 "page_size": 100,
             }
             if start_cursor:
-                query_params["start_cursor"] = start_cursor
+                body["start_cursor"] = start_cursor
 
-            result = self.client.databases.query(**query_params)
+            resp = self._http.post(
+                f"/v1/databases/{self.database_id}/query",
+                json=body,
+            )
+            resp.raise_for_status()
+            result = resp.json()
 
             for page in result.get("results", []):
                 sync_key = self._extract_sync_key(page)
@@ -234,7 +252,7 @@ class NotionClientWrapper:
         now_iso = datetime.now().astimezone().isoformat()
 
         properties = {
-            "Task": {
+            self._title_prop: {
                 "title": [{"text": {"content": activity.title}}]
             },
             "Course": {

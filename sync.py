@@ -23,7 +23,7 @@ from pathlib import Path
 from colorama import Fore, Style, init as colorama_init
 from dotenv import load_dotenv
 
-from moodle_client import MoodleClient, MoodleAuthError, MoodleAPIError
+from brightspace_client import BrightspaceClient, BrightspaceAuthError, BrightspaceError
 from notion_client_wrapper import NotionClientWrapper, NotionSyncError
 from models import MoodleActivity, SyncResult, SyncStatus
 
@@ -90,7 +90,7 @@ def load_config() -> dict:
         sys.exit(1)
 
     # Optional values with defaults
-    config["MOODLE_URL"] = os.getenv("MOODLE_URL", "https://my.uopeople.edu").strip()
+    config["LEARN_URL"] = os.getenv("LEARN_URL", "https://learn.uopeople.edu").strip()
     config["TIMEZONE"] = os.getenv("TIMEZONE", "Asia/Dhaka").strip()
     config["URGENT_HOURS"] = int(os.getenv("URGENT_HOURS", "24"))
     config["SOON_HOURS"] = int(os.getenv("SOON_HOURS", "72"))
@@ -165,13 +165,13 @@ def print_sync_summary(result: SyncResult):
 # Core Sync Logic
 # ─────────────────────────────────────────────
 
-def fetch_all_activities(moodle: MoodleClient, config: dict) -> list[MoodleActivity]:
-    """Fetch all activities from Moodle."""
+def fetch_all_activities(client: BrightspaceClient, config: dict) -> list[MoodleActivity]:
+    """Fetch all activities from Brightspace."""
     logger = logging.getLogger(__name__)
 
     # Step 1: Get enrolled courses
     print(f"\n  {Fore.CYAN}📖 Fetching enrolled courses...{Style.RESET_ALL}")
-    courses = moodle.get_enrolled_courses()
+    courses = client.get_enrolled_courses()
     if not courses:
         print(f"  {Fore.YELLOW}⚠️  No courses found. Are you currently enrolled?{Style.RESET_ALL}")
         return []
@@ -182,26 +182,29 @@ def fetch_all_activities(moodle: MoodleClient, config: dict) -> list[MoodleActiv
 
     course_ids = [c["id"] for c in courses]
 
-    # Step 2: Fetch assignments
+    # Step 2: Fetch assignments (dropbox)
     print(f"\n  {Fore.CYAN}📝 Fetching assignments...{Style.RESET_ALL}")
-    assignments = moodle.get_assignments(course_ids)
+    assignments = client.get_assignments(course_ids)
     print(f"  Found {len(assignments)} assignment(s)")
 
-    # Step 3: Fetch calendar events
-    print(f"\n  {Fore.CYAN}📅 Fetching calendar events...{Style.RESET_ALL}")
-    events = moodle.get_calendar_events(course_ids)
-    print(f"  Found {len(events)} calendar event(s)")
+    # Step 3: Fetch quizzes
+    print(f"\n  {Fore.CYAN}📝 Fetching quizzes...{Style.RESET_ALL}")
+    quizzes = client.get_quizzes(course_ids)
+    print(f"  Found {len(quizzes)} quiz(es)")
 
-    # Step 4: Fetch forums
+    # Step 4: Fetch forums (discussions)
     print(f"\n  {Fore.CYAN}💬 Fetching forums...{Style.RESET_ALL}")
-    forums = moodle.get_forums(course_ids)
-    print(f"  Found {len(forums)} forum(s)")
+    forums = client.get_forums(course_ids)
+    if forums:
+        print(f"  Found {len(forums)} forum(s)")
+    else:
+        print(f"  No discussion forums found")
 
     # Merge and deduplicate
     all_activities = []
     seen_keys = set()
 
-    for activity in assignments + events + forums:
+    for activity in assignments + quizzes + forums:
         if activity.unique_key not in seen_keys:
             seen_keys.add(activity.unique_key)
             all_activities.append(activity)
@@ -260,25 +263,24 @@ def sync_to_notion(
 # CLI Commands
 # ─────────────────────────────────────────────
 
-def cmd_test_moodle(config: dict):
-    """Test Moodle connection."""
-    print(f"\n  {Fore.CYAN}🔌 Testing Moodle connection...{Style.RESET_ALL}")
-    moodle = MoodleClient(
-        base_url=config["MOODLE_URL"],
+def cmd_test_brightspace(config: dict):
+    """Test Brightspace connection."""
+    print(f"\n  {Fore.CYAN}🔌 Testing Brightspace connection...{Style.RESET_ALL}")
+    client = BrightspaceClient(
+        base_url=config["LEARN_URL"],
         username=config["MOODLE_USERNAME"],
         password=config["MOODLE_PASSWORD"],
     )
-    result = moodle.test_connection()
+    result = client.test_connection()
 
     if result["success"]:
-        print(f"  {Fore.GREEN}✅ Moodle connection successful!{Style.RESET_ALL}")
+        print(f"  {Fore.GREEN}✅ Brightspace connection successful!{Style.RESET_ALL}")
         print(f"     Mode: {result.get('mode', 'unknown')}")
         if result.get("site_name"):
             print(f"     Site: {result['site_name']}")
-        if result.get("fullname"):
-            print(f"     User: {result['fullname']}")
+        print(f"     Courses: {result.get('course_count', 0)}")
     else:
-        print(f"  {Fore.RED}❌ Moodle connection failed!{Style.RESET_ALL}")
+        print(f"  {Fore.RED}❌ Brightspace connection failed!{Style.RESET_ALL}")
         print(f"     Error: {result.get('error', 'Unknown error')}")
         sys.exit(1)
 
@@ -306,22 +308,22 @@ def cmd_full_sync(config: dict, dry_run: bool = False):
     """Run the full sync pipeline."""
     logger = logging.getLogger(__name__)
 
-    # Step 1: Authenticate with Moodle
-    print(f"\n  {Fore.CYAN}🔐 Authenticating with Moodle...{Style.RESET_ALL}")
+    # Step 1: Authenticate with Brightspace
+    print(f"\n  {Fore.CYAN}🔐 Authenticating with Brightspace...{Style.RESET_ALL}")
     try:
-        moodle = MoodleClient(
-            base_url=config["MOODLE_URL"],
+        client = BrightspaceClient(
+            base_url=config["LEARN_URL"],
             username=config["MOODLE_USERNAME"],
             password=config["MOODLE_PASSWORD"],
         )
-        moodle.authenticate()
-        print(f"  {Fore.GREEN}✅ Moodle authenticated{Style.RESET_ALL}")
-    except MoodleAuthError as e:
-        print(f"  {Fore.RED}❌ Moodle auth failed: {e}{Style.RESET_ALL}")
+        client.authenticate()
+        print(f"  {Fore.GREEN}✅ Brightspace authenticated{Style.RESET_ALL}")
+    except BrightspaceAuthError as e:
+        print(f"  {Fore.RED}❌ Brightspace auth failed: {e}{Style.RESET_ALL}")
         sys.exit(1)
 
     # Step 2: Fetch all activities
-    activities = fetch_all_activities(moodle, config)
+    activities = fetch_all_activities(client, config)
     print(f"\n  📋 Total unique activities: {len(activities)}")
     print_activity_table(activities, config)
 
@@ -359,13 +361,13 @@ def main():
     colorama_init(autoreset=True)
 
     parser = argparse.ArgumentParser(
-        description="Sync UoPeople Moodle assignments to Notion",
+        description="Sync UoPeople Brightspace assignments to Notion",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python sync.py                  Full sync
   python sync.py --dry-run        Preview without writing to Notion
-  python sync.py --test-moodle    Verify Moodle credentials
+  python sync.py --test-brightspace  Verify Brightspace credentials
   python sync.py --test-notion    Verify Notion setup
   python sync.py -v               Verbose output
         """,
@@ -376,9 +378,9 @@ Examples:
         help="Fetch data but don't write to Notion",
     )
     parser.add_argument(
-        "--test-moodle",
+        "--test-brightspace",
         action="store_true",
-        help="Test Moodle connection only",
+        help="Test Brightspace connection only",
     )
     parser.add_argument(
         "--test-notion",
@@ -402,8 +404,8 @@ Examples:
     print(f"  ⏰ {timestamp}")
 
     # Route to the right command
-    if args.test_moodle:
-        cmd_test_moodle(config)
+    if args.test_brightspace:
+        cmd_test_brightspace(config)
     elif args.test_notion:
         cmd_test_notion(config)
     else:

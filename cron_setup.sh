@@ -34,8 +34,14 @@ if [ ! -f "$SYNC_SCRIPT" ]; then
     exit 1
 fi
 
-# Find Python
-PYTHON_BIN=$(which python3 2>/dev/null || which python 2>/dev/null)
+# Find Python (prefer virtual environment)
+if [ -f "$SCRIPT_DIR/venv/bin/python3" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/venv/bin/python3"
+elif [ -f "$SCRIPT_DIR/venv/bin/python" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+else
+    PYTHON_BIN=$(which python3 2>/dev/null || which python 2>/dev/null)
+fi
 if [ -z "$PYTHON_BIN" ]; then
     echo -e "${RED}❌ Python not found. Please install Python 3.8+${NC}"
     exit 1
