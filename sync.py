@@ -220,12 +220,15 @@ def fetch_all_activities(client: BrightspaceClient, config: dict) -> list[Moodle
         if activity.course_id in course_map:
             activity.course_name = course_map[activity.course_id]
 
-    # Sort by due date (soonest first, no-date at end)
-    all_activities.sort(
-        key=lambda a: (a.due_date is None, a.due_date or datetime.max.replace(tzinfo=None))
-    )
+    # Filter: only include activities with a due date
+    # This removes orientation/resource courses that have no deadlines
+    filtered = [a for a in all_activities if a.due_date is not None]
 
-    return all_activities
+    # Sort by due date (soonest first)
+    filtered.sort(key=lambda a: a.due_date or datetime.max.replace(tzinfo=None))
+
+    print(f"  (filtered out {len(all_activities) - len(filtered)} items without due dates)")
+    return filtered
 
 
 def sync_to_notion(
