@@ -126,7 +126,6 @@ class NotionClientWrapper:
             "Status": "status",
             "Priority": "select",
             "Moodle Link": "url",
-            "Description": "rich_text",
             "Synced At": "date",
             "Sync Key": "rich_text",  # Hidden field for duplicate detection
         }
@@ -156,7 +155,22 @@ class NotionClientWrapper:
                     json={"properties": updates},
                 )
                 logger.info("✅ Updated database schema with %d new properties", len(updates))
-            else:
+
+            # Remove deprecated properties
+            deprecated = ["Description"]
+            remove_updates = {}
+            for prop in deprecated:
+                if prop in existing_props:
+                    logger.info("Removing deprecated property: %s", prop)
+                    remove_updates[prop] = None
+            if remove_updates:
+                self._http.patch(
+                    f"/v1/databases/{self.database_id}",
+                    json={"properties": remove_updates},
+                )
+                logger.info("✅ Removed %d deprecated properties", len(remove_updates))
+
+            if not updates and not remove_updates:
                 logger.info("✅ Database schema is up to date")
 
         except APIResponseError as e:
@@ -281,12 +295,6 @@ class NotionClientWrapper:
         # Add Moodle link if available
         if activity.moodle_url:
             properties["Moodle Link"] = {"url": activity.moodle_url}
-
-        # Add description if available
-        if activity.description:
-            properties["Description"] = {
-                "rich_text": [{"text": {"content": activity.description[:2000]}}]
-            }
 
         return properties
 
